@@ -10,6 +10,7 @@ const LogicGateGame = () => {
   const [connecting, setConnecting] = useState(null);
   const [simulating, setSimulating] = useState(false);
   const [gridSize] = useState(20);
+  const [lastTouch, setLastTouch] = useState({ x: 0, y: 0 });
 
   // Component types with their properties
   const componentTypes = {
@@ -426,7 +427,6 @@ const LogicGateGame = () => {
             >
               Clear All
             </button>
-          </div>
         </div>
 
         {/* Component Palette */}
@@ -454,7 +454,6 @@ const LogicGateGame = () => {
       </div>
 
       {/* Canvas */}
-      <div className="flex-1 relative overflow-hidden">
         <canvas
           ref={canvasRef}
           className="w-full h-full cursor-crosshair touch-none"
@@ -467,11 +466,17 @@ const LogicGateGame = () => {
             handleMouseDown({ clientX: touch.clientX, clientY: touch.clientY });
           }}
           onTouchMove={(e) => {
+            e.preventDefault();
             const touch = e.touches[0];
+            setLastTouch({ x: touch.clientX, y: touch.clientY });
             handleMouseMove({ clientX: touch.clientX, clientY: touch.clientY });
           }}
-          onTouchEnd={(e) => handleMouseUp(e)}
-          />
+
+          onTouchEnd={(e) => {
+            handleMouseUp({ clientX: lastTouch.x, clientY: lastTouch.y });
+          }}
+        />
+
       </div>
 
       {/* Status Bar */}
