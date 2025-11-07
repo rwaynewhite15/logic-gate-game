@@ -103,13 +103,23 @@ const LogicGateGame = () => {
 
   // Drawing on canvas
   useEffect(() => {
+    const handleResize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    };
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
+    if (!ctx) return;
 
     // Clear canvas
     ctx.fillStyle = '#1e293b';
@@ -293,7 +303,7 @@ const LogicGateGame = () => {
       const distToCenter = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
 
       // If click is near the center (inside ~15px radius), toggle state
-      if (distToCenter < 15) {
+      if (distToCenter < 25) {
         setComponents(components.map(c =>
           c.id === clicked.id ? { ...c, state: !c.state } : c
         ));
@@ -420,12 +430,12 @@ const LogicGateGame = () => {
         </div>
 
         {/* Component Palette */}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 overflow-x-auto py-2">
           {Object.entries(componentTypes).map(([key, type]) => (
             <button
               key={key}
               onClick={() => addComponent(key)}
-              className="px-4 py-2 rounded text-white font-medium transition-colors"
+              className="px-5 py-3 rounded text-white font-medium transition-colors min-w-[80px] flex-shrink-0"
               style={{ backgroundColor: type.color }}
             >
               {type.name}
@@ -447,12 +457,21 @@ const LogicGateGame = () => {
       <div className="flex-1 relative overflow-hidden">
         <canvas
           ref={canvasRef}
-          className="w-full h-full cursor-crosshair"
+          className="w-full h-full cursor-crosshair touch-none"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-        />
+          onTouchStart={(e) => {
+            const touch = e.touches[0];
+            handleMouseDown({ clientX: touch.clientX, clientY: touch.clientY });
+          }}
+          onTouchMove={(e) => {
+            const touch = e.touches[0];
+            handleMouseMove({ clientX: touch.clientX, clientY: touch.clientY });
+          }}
+          onTouchEnd={(e) => handleMouseUp(e)}
+          />
       </div>
 
       {/* Status Bar */}
