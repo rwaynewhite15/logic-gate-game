@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Trash2, Save, Zap, Grid3x3 } from 'lucide-react';
+import { Play, Pause, Trash2, Zap } from 'lucide-react';
 
 const LogicGateGame = () => {
   const canvasRef = useRef(null);
@@ -10,7 +10,6 @@ const LogicGateGame = () => {
   const [connecting, setConnecting] = useState(null);
   const [simulating, setSimulating] = useState(false);
   const [gridSize] = useState(20);
-  const [lastTouch, setLastTouch] = useState({ x: 0, y: 0 });
 
   // Component types with their properties
   const componentTypes = {
@@ -104,23 +103,13 @@ const LogicGateGame = () => {
 
   // Drawing on canvas
   useEffect(() => {
-    const handleResize = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-    };
-    window.addEventListener('resize', handleResize);
-    handleResize();
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
 
     // Clear canvas
     ctx.fillStyle = '#1e293b';
@@ -270,72 +259,83 @@ const LogicGateGame = () => {
     setComponents([...components, newComp]);
   };
 
-  const handleMouseDown = (e) => {
-  const canvas = canvasRef.current;
-  const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-
-  // --- 1️⃣ Start connecting from output pin ---
-  for (const comp of components) {
-    const type = componentTypes[comp.type];
-    if (type.outputs > 0) {
-      const pos = getOutputPinPos(comp);
-      if (isNearPin(x, y, pos.x, pos.y)) {
-        setConnecting({ from: comp.id, x, y });
-        setSelectedComponent(null);
-        return;
-      }
-    }
-  }
-
-  // --- 2️⃣ Check if clicked on a component ---
-  const clicked = components.find(
-    c => x >= c.x && x <= c.x + 60 && y >= c.y && y <= c.y + 50
-  );
-
-  if (clicked) {
-    setSelectedComponent(clicked);
-
-    // Handle INPUT component special behavior
-    if (clicked.type === "INPUT") {
-      const centerX = clicked.x + 30;
-      const centerY = clicked.y + 25;
-      const distToCenter = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
-
-      // If click is near the center (inside ~15px radius), toggle state
-      if (distToCenter < 25) {
-        setComponents(components.map(c =>
-          c.id === clicked.id ? { ...c, state: !c.state } : c
-        ));
-        return;
-      } else {
-        // Otherwise, start dragging if clicked near edges
-        setDragging({
-          id: clicked.id,
-          offsetX: x - clicked.x,
-          offsetY: y - clicked.y,
-        });
-        return;
-      }
-    }
-
-    // Non-input components → always drag
-    setDragging({
-      id: clicked.id,
-      offsetX: x - clicked.x,
-      offsetY: y - clicked.y,
-    });
-  } else {
-    setSelectedComponent(null);
-  }
-};
-
-  const handleMouseMove = (e) => {
+  // Get coordinates from both mouse and touch events
+  const getEventCoordinates = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    
+    // Handle both mouse and touch events
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
+  };
+
+  const handlePointerDown = (e) => {
+    e.preventDefault(); // Prevent default touch behavior
+    const { x, y } = getEventCoordinates(e);
+
+    // --- 1️⃣ Start connecting from output pin ---
+    for (const comp of components) {
+      const type = componentTypes[comp.type];
+      if (type.outputs > 0) {
+        const pos = getOutputPinPos(comp);
+        if (isNearPin(x, y, pos.x, pos.y)) {
+          setConnecting({ from: comp.id, x, y });
+          setSelectedComponent(null);
+          return;
+        }
+      }
+    }
+
+    // --- 2️⃣ Check if clicked on a component ---
+    const clicked = components.find(
+      c => x >= c.x && x <= c.x + 60 && y >= c.y && y <= c.y + 50
+    );
+
+    if (clicked) {
+      setSelectedComponent(clicked);
+
+      // Handle INPUT component special behavior
+      if (clicked.type === "INPUT") {
+        const centerX = clicked.x + 30;
+        const centerY = clicked.y + 25;
+        const distToCenter = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+
+        // If click is near the center (inside ~15px radius), toggle state
+        if (distToCenter < 15) {
+          setComponents(components.map(c =>
+            c.id === clicked.id ? { ...c, state: !c.state } : c
+          ));
+          return;
+        } else {
+          // Otherwise, start dragging if clicked near edges
+          setDragging({
+            id: clicked.id,
+            offsetX: x - clicked.x,
+            offsetY: y - clicked.y,
+          });
+          return;
+        }
+      }
+
+      // Non-input components → always drag
+      setDragging({
+        id: clicked.id,
+        offsetX: x - clicked.x,
+        offsetY: y - clicked.y,
+      });
+    } else {
+      setSelectedComponent(null);
+    }
+  };
+
+  const handlePointerMove = (e) => {
+    e.preventDefault(); // Prevent scrolling on mobile
+    const { x, y } = getEventCoordinates(e);
 
     if (dragging) {
       setComponents(components.map(c => 
@@ -348,12 +348,9 @@ const LogicGateGame = () => {
     }
   };
 
-  const handleMouseUp = (e) => {
+  const handlePointerUp = (e) => {
     if (connecting) {
-      const canvas = canvasRef.current;
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const { x, y } = getEventCoordinates(e);
 
       // Find if released near an input pin
       for (const comp of components) {
@@ -400,42 +397,44 @@ const LogicGateGame = () => {
     <div className="w-full h-screen bg-slate-900 flex flex-col">
       {/* Toolbar */}
       <div className="bg-slate-800 border-b border-slate-700 p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h1 className="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
             <Zap className="text-blue-400" />
-            Logic Gate Computer Builder
+            <span className="hidden sm:inline">Logic Gate Computer Builder</span>
+            <span className="sm:hidden">Logic Gates</span>
           </h1>
           <div className="flex gap-2">
             <button
               onClick={() => setSimulating(!simulating)}
-              className={`px-4 py-2 rounded flex items-center gap-2 ${
+              className={`px-3 md:px-4 py-2 rounded flex items-center gap-2 text-sm md:text-base ${
                 simulating ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
               } text-white transition-colors`}
             >
-              {simulating ? <><Pause size={16} /> Stop</> : <><Play size={16} /> Simulate</>}
+              {simulating ? <><Pause size={16} /> Stop</> : <><Play size={16} /> Start</>}
             </button>
             <button
               onClick={deleteSelected}
               disabled={!selectedComponent}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded flex items-center gap-2 transition-colors"
+              className="px-3 md:px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded flex items-center gap-2 transition-colors text-sm md:text-base"
             >
-              <Trash2 size={16} /> Delete
+              <Trash2 size={16} /> <span className="hidden sm:inline">Delete</span>
             </button>
             <button
               onClick={clearAll}
-              className="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded transition-colors"
+              className="px-3 md:px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded transition-colors text-sm md:text-base"
             >
-              Clear All
+              Clear
             </button>
+          </div>
         </div>
 
         {/* Component Palette */}
-        <div className="flex flex-wrap gap-2 overflow-x-auto py-2">
+        <div className="flex flex-wrap gap-2">
           {Object.entries(componentTypes).map(([key, type]) => (
             <button
               key={key}
               onClick={() => addComponent(key)}
-              className="px-5 py-3 rounded text-white font-medium transition-colors min-w-[80px] flex-shrink-0"
+              className="px-3 py-2 rounded text-white font-medium transition-colors text-sm"
               style={{ backgroundColor: type.color }}
             >
               {type.name}
@@ -445,46 +444,41 @@ const LogicGateGame = () => {
       </div>
 
       {/* Instructions */}
-      <div className="bg-slate-800 border-b border-slate-700 px-4 py-2 text-sm text-slate-300">
-        <p>
+      <div className="bg-slate-800 border-b border-slate-700 px-4 py-2 text-xs md:text-sm text-slate-300">
+        <p className="hidden md:block">
           <strong>Instructions:</strong> Click component buttons to add them • Click INPUT to toggle ON/OFF • 
           Drag components to move • <strong>Click and drag from OUTPUT pin (right side) to INPUT pin (left side)</strong> to connect • 
-          Click component to select (then Delete) • Press Simulate to run
+          Click component to select (then Delete) • Press Start to run
+        </p>
+        <p className="md:hidden">
+          <strong>Mobile:</strong> Tap buttons to add • Tap INPUT center to toggle • 
+          Drag components • <strong>Drag from right pin to left pin</strong> to wire • Tap to select
         </p>
       </div>
 
       {/* Canvas */}
+      <div className="flex-1 relative overflow-hidden">
         <canvas
           ref={canvasRef}
           className="w-full h-full cursor-crosshair touch-none"
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onTouchStart={(e) => {
-            const touch = e.touches[0];
-            handleMouseDown({ clientX: touch.clientX, clientY: touch.clientY });
-          }}
-          onTouchMove={(e) => {
-            e.preventDefault();
-            const touch = e.touches[0];
-            setLastTouch({ x: touch.clientX, y: touch.clientY });
-            handleMouseMove({ clientX: touch.clientX, clientY: touch.clientY });
-          }}
-
-          onTouchEnd={(e) => {
-            handleMouseUp({ clientX: lastTouch.x, clientY: lastTouch.y });
-          }}
+          onMouseDown={handlePointerDown}
+          onMouseMove={handlePointerMove}
+          onMouseUp={handlePointerUp}
+          onMouseLeave={handlePointerUp}
+          onTouchStart={handlePointerDown}
+          onTouchMove={handlePointerMove}
+          onTouchEnd={handlePointerUp}
         />
-
       </div>
 
       {/* Status Bar */}
-      <div className="bg-slate-800 border-t border-slate-700 px-4 py-2 text-sm text-slate-300">
-        <div className="flex justify-between items-center">
+      <div className="bg-slate-800 border-t border-slate-700 px-4 py-2 text-xs md:text-sm text-slate-300">
+        <div className="flex justify-between items-center flex-wrap gap-2">
           <div>Components: {components.length} | Wires: {wires.length}</div>
-          <div>{simulating ? '🟢 Simulating...' : '⚪ Paused'} | {connecting ? '🔵 Connecting wire...' : selectedComponent ? '🟡 Component selected' : '⚪ Ready'}</div>
-          <div className="text-slate-400 text-xs">
+          <div className="text-xs">
+            {simulating ? '🟢 Running' : '⚪ Paused'} | {connecting ? '🔵 Wiring' : selectedComponent ? '🟡 Selected' : '⚪ Ready'}
+          </div>
+          <div className="text-slate-400 text-xs hidden sm:block">
             Created by Robert • Made with Claude Sonnet 4.5
           </div>
         </div>
