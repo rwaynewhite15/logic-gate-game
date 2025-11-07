@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Trash2, Zap } from 'lucide-react';
+import { Play, Pause, Trash2, Save, Zap, Grid3x3 } from 'lucide-react';
 
 const LogicGateGame = () => {
   const canvasRef = useRef(null);
@@ -10,6 +10,9 @@ const LogicGateGame = () => {
   const [connecting, setConnecting] = useState(null);
   const [simulating, setSimulating] = useState(false);
   const [gridSize] = useState(20);
+  const [clipboard, setClipboard] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
 
   // Component types with their properties
   const componentTypes = {
@@ -248,6 +251,113 @@ const LogicGateGame = () => {
 
   const snapToGrid = (value) => Math.round(value / gridSize) * gridSize;
 
+  // History management
+  const saveToHistory = (newComponents, newWires) => {
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push({ components: newComponents, wires: newWires });
+    if (newHistory.length > 50) newHistory.shift(); // Keep last 50 states
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  };
+
+  const undo = () => {
+    if (historyIndex > 0) {
+      const prevState = history[historyIndex - 1];
+      setComponents(prevState.components);
+      setWires(prevState.wires);
+      setHistoryIndex(historyIndex - 1);
+      setSelectedComponent(null);
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      const nextState = history[historyIndex + 1];
+      setComponents(nextState.components);
+      setWires(nextState.wires);
+      setHistoryIndex(historyIndex + 1);
+      setSelectedComponent(null);
+    }
+  };
+
+  // Copy/Paste functionality
+  const copyComponent = () => {
+    if (selectedComponent) {
+      setClipboard({ component: selectedComponent });
+    }
+  };
+
+  const pasteComponent = () => {
+    if (clipboard?.component) {
+      const newComp = {
+        ...clipboard.component,
+        id: Date.now(),
+        x: snapToGrid(clipboard.component.x + 40),
+        y: snapToGrid(clipboard.component.y + 40),
+        state: clipboard.component.type === 'INPUT' ? false : false,
+      };
+      const newComponents = [...components, newComp];
+      setComponents(newComponents);
+      saveToHistory(newComponents, wires);
+      setSelectedComponent(newComp);
+    }
+  };
+
+  const duplicateComponent = () => {
+    if (selectedComponent) {
+      const newComp = {
+        ...selectedComponent,
+        id: Date.now(),
+        x: snapToGrid(selectedComponent.x + 40),
+        y: snapToGrid(selectedComponent.y + 40),
+        state: selectedComponent.type === 'INPUT' ? false : false,
+      };
+      const newComponents = [...components, newComp];
+      setComponents(newComponents);
+      saveToHistory(newComponents, wires);
+      setSelectedComponent(newComp);
+    }
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      // Ctrl/Cmd + C: Copy
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        e.preventDefault();
+        copyComponent();
+      }
+      // Ctrl/Cmd + V: Paste
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        e.preventDefault();
+        pasteComponent();
+      }
+      // Ctrl/Cmd + D: Duplicate
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        duplicateComponent();
+      }
+      // Ctrl/Cmd + Z: Undo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      // Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y: Redo
+      if ((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key === 'z' || e.key === 'y')) {
+        e.preventDefault();
+        redo();
+      }
+      // Delete or Backspace: Delete selected
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedComponent) {
+        e.preventDefault();
+        deleteSelected();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [selectedComponent, clipboard, historyIndex, history, components, wires]);
+
   const addComponent = (type) => {
     const newComp = {
       id: Date.now(),
@@ -256,29 +366,18 @@ const LogicGateGame = () => {
       y: snapToGrid(100 + Math.random() * 200),
       state: type === 'INPUT' ? false : false,
     };
-    setComponents([...components, newComp]);
+    const newComponents = [...components, newComp];
+    setComponents(newComponents);
+    saveToHistory(newComponents, wires);
   };
 
-  // Get coordinates from both mouse and touch events
-  const getEventCoordinates = (e) => {
+  const handleMouseDown = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    
-    // Handle both mouse and touch events
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    
-    return {
-      x: clientX - rect.left,
-      y: clientY - rect.top
-    };
-  };
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
-  const handlePointerDown = (e) => {
-    e.preventDefault(); // Prevent default touch behavior
-    const { x, y } = getEventCoordinates(e);
-
-    // --- 1️⃣ Start connecting from output pin ---
+    // Check if clicking on any output pin to start connecting
     for (const comp of components) {
       const type = componentTypes[comp.type];
       if (type.outputs > 0) {
@@ -291,51 +390,25 @@ const LogicGateGame = () => {
       }
     }
 
-    // --- 2️⃣ Check if clicked on a component ---
-    const clicked = components.find(
-      c => x >= c.x && x <= c.x + 60 && y >= c.y && y <= c.y + 50
+    // Check if clicking on a component
+    const clicked = components.find(c => 
+      x >= c.x && x <= c.x + 60 && y >= c.y && y <= c.y + 50
     );
 
     if (clicked) {
       setSelectedComponent(clicked);
-
-      // Handle INPUT component special behavior
-      if (clicked.type === "INPUT") {
-        const centerX = clicked.x + 30;
-        const centerY = clicked.y + 25;
-        const distToCenter = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
-
-        // If click is near the center (inside ~15px radius), toggle state
-        if (distToCenter < 15) {
-          setComponents(components.map(c =>
-            c.id === clicked.id ? { ...c, state: !c.state } : c
-          ));
-          return;
-        } else {
-          // Otherwise, start dragging if clicked near edges
-          setDragging({
-            id: clicked.id,
-            offsetX: x - clicked.x,
-            offsetY: y - clicked.y,
-          });
-          return;
-        }
-      }
-
-      // Non-input components → always drag
-      setDragging({
-        id: clicked.id,
-        offsetX: x - clicked.x,
-        offsetY: y - clicked.y,
-      });
+      // Start dragging for all components
+      setDragging({ id: clicked.id, offsetX: x - clicked.x, offsetY: y - clicked.y });
     } else {
       setSelectedComponent(null);
     }
   };
 
-  const handlePointerMove = (e) => {
-    e.preventDefault(); // Prevent scrolling on mobile
-    const { x, y } = getEventCoordinates(e);
+  const handleMouseMove = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
     if (dragging) {
       setComponents(components.map(c => 
@@ -348,9 +421,12 @@ const LogicGateGame = () => {
     }
   };
 
-  const handlePointerUp = (e) => {
+  const handleMouseUp = (e) => {
     if (connecting) {
-      const { x, y } = getEventCoordinates(e);
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
 
       // Find if released near an input pin
       for (const comp of components) {
@@ -376,13 +452,41 @@ const LogicGateGame = () => {
       }
       setConnecting(null);
     }
+    
+    // Toggle INPUT state if it was a click (not a drag)
+    if (dragging && !connecting) {
+      const comp = components.find(c => c.id === dragging.id);
+      if (comp && comp.type === 'INPUT') {
+        const canvas = canvasRef.current;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        // Check if mouse barely moved (click, not drag)
+        const movedDistance = Math.sqrt(
+          Math.pow(x - (comp.x + dragging.offsetX), 2) + 
+          Math.pow(y - (comp.y + dragging.offsetY), 2)
+        );
+        
+        if (movedDistance < 5) {
+          // It was a click, toggle the input
+          setComponents(components.map(c => 
+            c.id === dragging.id ? { ...c, state: !c.state } : c
+          ));
+        }
+      }
+    }
+    
     setDragging(null);
   };
 
   const deleteSelected = () => {
     if (!selectedComponent) return;
-    setComponents(components.filter(c => c.id !== selectedComponent.id));
-    setWires(wires.filter(w => w.from !== selectedComponent.id && w.to !== selectedComponent.id));
+    const newComponents = components.filter(c => c.id !== selectedComponent.id);
+    const newWires = wires.filter(w => w.from !== selectedComponent.id && w.to !== selectedComponent.id);
+    setComponents(newComponents);
+    setWires(newWires);
+    saveToHistory(newComponents, newWires);
     setSelectedComponent(null);
   };
 
@@ -397,33 +501,72 @@ const LogicGateGame = () => {
     <div className="w-full h-screen bg-slate-900 flex flex-col">
       {/* Toolbar */}
       <div className="bg-slate-800 border-b border-slate-700 p-4">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <h1 className="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Zap className="text-blue-400" />
-            <span className="hidden sm:inline">Logic Gate Computer Builder</span>
-            <span className="sm:hidden">Logic Gates</span>
+            Logic Gate Computer Builder
           </h1>
           <div className="flex gap-2">
             <button
               onClick={() => setSimulating(!simulating)}
-              className={`px-3 md:px-4 py-2 rounded flex items-center gap-2 text-sm md:text-base ${
+              className={`px-4 py-2 rounded flex items-center gap-2 ${
                 simulating ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
               } text-white transition-colors`}
             >
-              {simulating ? <><Pause size={16} /> Stop</> : <><Play size={16} /> Start</>}
+              {simulating ? <><Pause size={16} /> Stop</> : <><Play size={16} /> Simulate</>}
             </button>
             <button
               onClick={deleteSelected}
               disabled={!selectedComponent}
-              className="px-3 md:px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded flex items-center gap-2 transition-colors text-sm md:text-base"
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded flex items-center gap-2 transition-colors"
             >
-              <Trash2 size={16} /> <span className="hidden sm:inline">Delete</span>
+              <Trash2 size={16} /> Delete
+            </button>
+            <button
+              onClick={copyComponent}
+              disabled={!selectedComponent}
+              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded transition-colors"
+              title="Copy (Ctrl+C)"
+            >
+              Copy
+            </button>
+            <button
+              onClick={pasteComponent}
+              disabled={!clipboard}
+              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded transition-colors"
+              title="Paste (Ctrl+V)"
+            >
+              Paste
+            </button>
+            <button
+              onClick={duplicateComponent}
+              disabled={!selectedComponent}
+              className="px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded transition-colors"
+              title="Duplicate (Ctrl+D)"
+            >
+              Duplicate
+            </button>
+            <button
+              onClick={undo}
+              disabled={historyIndex <= 0}
+              className="px-3 py-2 bg-slate-600 hover:bg-slate-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded transition-colors"
+              title="Undo (Ctrl+Z)"
+            >
+              Undo
+            </button>
+            <button
+              onClick={redo}
+              disabled={historyIndex >= history.length - 1}
+              className="px-3 py-2 bg-slate-600 hover:bg-slate-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded transition-colors"
+              title="Redo (Ctrl+Shift+Z)"
+            >
+              Redo
             </button>
             <button
               onClick={clearAll}
-              className="px-3 md:px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded transition-colors text-sm md:text-base"
+              className="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded transition-colors"
             >
-              Clear
+              Clear All
             </button>
           </div>
         </div>
@@ -434,7 +577,7 @@ const LogicGateGame = () => {
             <button
               key={key}
               onClick={() => addComponent(key)}
-              className="px-3 py-2 rounded text-white font-medium transition-colors text-sm"
+              className="px-4 py-2 rounded text-white font-medium transition-colors"
               style={{ backgroundColor: type.color }}
             >
               {type.name}
@@ -444,15 +587,11 @@ const LogicGateGame = () => {
       </div>
 
       {/* Instructions */}
-      <div className="bg-slate-800 border-b border-slate-700 px-4 py-2 text-xs md:text-sm text-slate-300">
-        <p className="hidden md:block">
-          <strong>Instructions:</strong> Click component buttons to add them • Click INPUT to toggle ON/OFF • 
-          Drag components to move • <strong>Click and drag from OUTPUT pin (right side) to INPUT pin (left side)</strong> to connect • 
-          Click component to select (then Delete) • Press Start to run
-        </p>
-        <p className="md:hidden">
-          <strong>Mobile:</strong> Tap buttons to add • Tap INPUT center to toggle • 
-          Drag components • <strong>Drag from right pin to left pin</strong> to wire • Tap to select
+      <div className="bg-slate-800 border-b border-slate-700 px-4 py-2 text-sm text-slate-300">
+        <p>
+          <strong>Instructions:</strong> Click component buttons to add • Click INPUT to toggle ON/OFF • 
+          Drag components to move • Click and drag from OUTPUT pin to INPUT pin to connect • 
+          <strong>Keyboard:</strong> Ctrl+C (copy) • Ctrl+V (paste) • Ctrl+D (duplicate) • Ctrl+Z (undo) • Ctrl+Shift+Z (redo) • Delete (remove)
         </p>
       </div>
 
@@ -460,25 +599,20 @@ const LogicGateGame = () => {
       <div className="flex-1 relative overflow-hidden">
         <canvas
           ref={canvasRef}
-          className="w-full h-full cursor-crosshair touch-none"
-          onMouseDown={handlePointerDown}
-          onMouseMove={handlePointerMove}
-          onMouseUp={handlePointerUp}
-          onMouseLeave={handlePointerUp}
-          onTouchStart={handlePointerDown}
-          onTouchMove={handlePointerMove}
-          onTouchEnd={handlePointerUp}
+          className="w-full h-full cursor-crosshair"
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
         />
       </div>
 
       {/* Status Bar */}
-      <div className="bg-slate-800 border-t border-slate-700 px-4 py-2 text-xs md:text-sm text-slate-300">
-        <div className="flex justify-between items-center flex-wrap gap-2">
+      <div className="bg-slate-800 border-t border-slate-700 px-4 py-2 text-sm text-slate-300">
+        <div className="flex justify-between items-center">
           <div>Components: {components.length} | Wires: {wires.length}</div>
-          <div className="text-xs">
-            {simulating ? '🟢 Running' : '⚪ Paused'} | {connecting ? '🔵 Wiring' : selectedComponent ? '🟡 Selected' : '⚪ Ready'}
-          </div>
-          <div className="text-slate-400 text-xs hidden sm:block">
+          <div>{simulating ? '🟢 Simulating...' : '⚪ Paused'} | {connecting ? '🔵 Connecting wire...' : selectedComponent ? '🟡 Component selected' : '⚪ Ready'}</div>
+          <div className="text-slate-400 text-xs">
             Created by Robert • Made with Claude Sonnet 4.5
           </div>
         </div>
